@@ -1,0 +1,9 @@
+# игнорируем секреты Streamlit
+.streamlit/secrets.toml
+
+# игнорируем временные файлы Python
+__pycache__/
+*.pyc
+
+# игнорируем системные файлы
+.DS_Store
