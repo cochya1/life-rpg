@@ -16,25 +16,15 @@ from supabase import create_client, Client
 
 @st.cache_resource
 def get_supabase() -> Client:
-    url = (st.secrets.get("SUPABASE_URL") or "").strip()
-    key = (st.secrets.get("SUPABASE_ANON_KEY") or "").strip()
-
-    # быстрые проверки, чтобы увидеть причину прямо в UI
-    if not url:
-        st.error("SUPABASE_URL не задан в Secrets.")
-        st.stop()
-    if not url.startswith("https://") or ".supabase.co" not in url:
-        st.error(f"SUPABASE_URL выглядит некорректно: {url}")
+    url = st.secrets.get("SUPABASE_URL", "").strip()
+    key = st.secrets.get("SUPABASE_ANON_KEY", "").strip()  # <-- ВАЖНО: ANON
+    if not (url.startswith("https://") and ".supabase.co" in url):
+        st.error("❗ SUPABASE_URL не задан/неверный (Manage app → Settings → Secrets).")
         st.stop()
     if not key:
-        st.error("SUPABASE_ANON_KEY не задан в Secrets.")
+        st.error("❗ SUPABASE_ANON_KEY не задан (Settings → Secrets).")
         st.stop()
-
-    try:
-        return create_client(url, key)
-    except Exception as e:
-        st.error(f"Не удалось создать клиент Supabase: {e}")
-        st.stop()
+    return create_client(url, key)
 
 supabase = get_supabase()
 
@@ -95,11 +85,11 @@ def logout_button():
         st.session_state.pop("auth_user", None)
         st.rerun()
 
-# === Авторизация: без входа дальше не идём ===
+# === Проверка авторизации ===
 user_id = current_user_id()
 if not user_id:
-    auth_form()
-    st.stop()
+    auth_form()   # показываем форму логина/регистрации
+    st.stop()     # дальше код не идёт, пока не войдём
 
 # Кнопка выхода в сайдбаре
 logout_button()
@@ -117,7 +107,7 @@ def db_load_state(user_id: str) -> dict | None:
 def save_state():
     user_id = current_user_id()
     if not user_id:
-        return  # не авторизованы — не сохраняем
+        return  # не залогинен — не сохраняем
     try:
         db_save_state(user_id, serialize_state())
     except Exception as e:
