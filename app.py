@@ -10,8 +10,6 @@ import pandas as pd
 from datetime import datetime, date, timedelta
 from zoneinfo import ZoneInfo
 from collections import Counter
-from supabase import create_client
-import streamlit as st
 
 # ---------- SUPABASE AUTH (инициализация клиента) ----------
 from supabase import create_client, Client
@@ -33,17 +31,21 @@ supabase = get_supabase()
 def auth_form():
     """Простейшая форма входа/регистрации."""
     st.header("🔐 Вход в аккаунт")
+    # Если сегменты не поддерживаются твоей версией — замени на st.radio(...)
+    try:
+        mode = st.segmented_control("Режим", ["Войти", "Регистрация"], key="auth_mode")
+    except Exception:
+        mode = st.radio("Режим", ["Войти", "Регистрация"], key="auth_mode_radio")
 
-    mode = st.segmented_control("Режим", ["Войти", "Регистрация"], key="auth_mode")
     email = st.text_input("Email", key="auth_email")
     password = st.text_input("Пароль", type="password", key="auth_password")
 
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("Войти", use_container_width=True, disabled=(mode!="Войти")):
+        if st.button("Войти", use_container_width=True, disabled=(mode!="Войти" and mode!="Войти")):
             try:
                 res = supabase.auth.sign_in_with_password({"email": email, "password": password})
-                st.session_state.auth_user = res.user.model_dump()  # сохраняем юзера в сессию
+                st.session_state.auth_user = res.user.model_dump()
                 st.success("Готово! Вошли.")
                 st.rerun()
             except Exception as e:
@@ -63,7 +65,7 @@ def current_user_id() -> str | None:
     u = st.session_state.get("auth_user")
     if u and u.get("id"):
         return u["id"]
-    # попытка освежить сессию (если вкладка перезагружена)
+    # пробуем восстановить сессию
     try:
         res = supabase.auth.get_user()
         if res and res.user:
@@ -82,49 +84,16 @@ def logout_button():
         st.session_state.pop("auth_user", None)
         st.rerun()
 
-# ========================= АВТОРИЗАЦИЯ / USER_ID =========================
-def get_current_user_id() -> str:
-    # 1) если в секретах задан USER_ID — используем его (режим «один пользователь»)
-    sid = st.secrets.get("USER_ID")
-    if sid:
-        return sid.strip().lower()
+# === Авторизация: без входа дальше не идём ===
+user_id = current_user_id()
+if not user_id:
+    auth_form()
+    st.stop()
 
-    # 2) иначе — берём из session_state (если уже вошли)
-    if st.session_state.get("user_id"):
-        return st.session_state.user_id
+# Кнопка выхода в сайдбаре
+logout_button()
 
-    # 3) иначе — покажем простую форму логина
-    st.header("🔐 Вход")
-    email = st.text_input("Введите e-mail (используется как идентификатор ваших данных)")
-    if st.button("Войти") and email.strip():
-        st.session_state.user_id = email.strip().lower()
-        st.rerun()
-
-    st.stop()  # останавливаем рендер до логина
-
-def load_state_if_exists() -> bool:
-    user_id = get_current_user_id()
-    try:
-        data = db_load_state(user_id)
-        if data:
-            deserialize_state(data)
-            return True
-    except Exception as e:
-        st.sidebar.warning(f"Не удалось загрузить из базы: {e}")
-
-    # fallback: локальный файл (для отладки)
-    if os.path.exists(STATE_FILE):
-        try:
-            with open(STATE_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            deserialize_state(data)
-            return True
-        except Exception as e:
-            st.sidebar.warning(f"Не удалось загрузить локально: {e}")
-
-    return False
-
-
+# ---------- ХРАНИЛКА В SUPABASE ----------
 def db_save_state(user_id: str, data: dict):
     supabase.table("rpg_state").upsert({"user_id": user_id, "data": data}).execute()
 
@@ -137,7 +106,7 @@ def db_load_state(user_id: str) -> dict | None:
 def save_state():
     user_id = current_user_id()
     if not user_id:
-        return  # если не авторизован, не сохраняем
+        return  # не авторизованы — не сохраняем
     try:
         db_save_state(user_id, serialize_state())
     except Exception as e:
@@ -155,10 +124,6 @@ def load_state_if_exists() -> bool:
     except Exception as e:
         st.sidebar.warning(f"Не удалось загрузить из базы: {e}")
     return False
-
-
-# добавь это:
-USER_ID = st.secrets.get("USER_ID", "default_user")
 
 # Altair для пончиковых диаграмм
 import altair as alt
@@ -219,6 +184,8 @@ def compute_next_due(goal) -> date:
     mode = goal.get("recur_mode", "none")
     if mode == "daily":
         return goal["due"] + timedelta(days=1)
+    elif mode == "weekly":
+        return goal["due"] + timedelta(days=7)            # ← добавь это
     elif mode == "by_days":
         return next_from_days(goal["due"], goal.get("recur_days", []))
     return goal["due"]
@@ -539,28 +506,6 @@ def deserialize_state(data: dict):
             "failures": list(h.get("failures", [])),
         })
 
-
-def save_state():
-    try:
-        data = serialize_state()
-        response = supabase.table("rpg_state").upsert({
-            "user_id": USER_ID,
-            "data": data
-        }).execute()
-    except Exception as e:
-        st.sidebar.warning(f"Не удалось сохранить данные: {e}")
-
-
-def load_state_if_exists() -> bool:
-    try:
-        response = supabase.table("rpg_state").select("data").eq("user_id", USER_ID).execute()
-        if response.data:
-            deserialize_state(response.data[0]["data"])
-            return True
-    except Exception as e:
-        st.sidebar.warning(f"Не удалось загрузить данные: {e}")
-    return False
-
 # ========================= XP / СТАТЫ =========================
 def ensure_xp_log_dict():
     log = st.session_state.get("xp_log")
@@ -749,35 +694,6 @@ def auto_award_yesterday_if_ok():
         st.session_state.discipline_awarded_dates.append(y_str)
         save_state()
         st.sidebar.success("Вчера всё выполнено: Дисциплина +1.0 🎯")
-
-def auto_check_yearly_reset():
-    """
-    Каждый запуск проверяет: если сегодня 31 декабря >= 12:00 (МСК) и за этот год
-    ещё не сбрасывали — сформировать отчёт, поднять флаг модалки и обнулить статистику.
-    """
-    now_msk = _moscow_now()
-    year = now_msk.year
-    # 31 декабря, 12:00 или позже
-    if (now_msk.month, now_msk.day) != (12, 31) or now_msk.hour < 12:
-        return
-    # уже сбрасывали этот год?
-    if st.session_state.get("last_reset_year") == year:
-        return
-
-    # --- формируем snapshot для отчёта
-    snapshot = serialize_state()  # ТЕКУЩЕЕ состояние до обнуления
-    report_bytes = export_year_report_xlsx(snapshot, year)
-    # сохраним в session_state для download_button
-    st.session_state.yearly_report_bytes = report_bytes
-    st.session_state.yearly_report_year = year
-
-    # --- обнуляем всё
-    reset_all_stats_after_export()
-
-    # запомним, что в этом году уже сброшено
-    st.session_state.last_reset_year = year
-    st.session_state.year_reset_pending = True
-    save_state()
 
 # ========================= UI: ЗАДАЧИ =========================
 def goal_uid(g) -> str:
@@ -1913,15 +1829,6 @@ auto_check_yearly_reset()            # ⬅️ запуск годового сб
 
 # страховка: всегда есть "page"
 st.session_state.setdefault("page", "home")
-
-# === Проверка авторизации ===
-user_id = current_user_id()
-if not user_id:
-    auth_form()   # показываем форму логина/регистрации
-    st.stop()     # дальше код не идёт, пока не войдём
-
-# Если залогинены — даём кнопку выхода
-logout_button()
 
 # --- РОУТЕР ---
 st.session_state.setdefault("page", "home")
