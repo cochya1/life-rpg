@@ -156,7 +156,6 @@ def load_state_if_exists() -> bool:
         st.sidebar.warning(f"Не удалось загрузить из базы: {e}")
     return False
 
-supabase = create_client(url, key)
 
 # добавь это:
 USER_ID = st.secrets.get("USER_ID", "default_user")
