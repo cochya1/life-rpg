@@ -13,6 +13,75 @@ from collections import Counter
 from supabase import create_client
 import streamlit as st
 
+# ---------- SUPABASE AUTH ----------
+from supabase import create_client, Client
+
+@st.cache_resource
+def get_supabase() -> Client:
+    url = st.secrets.get("SUPABASE_URL", "").strip()
+    key = st.secrets.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+    if not (url.startswith("https://") and url.endswith(".supabase.co")):
+        st.error("❗ SUPABASE_URL не задан или неверный (Settings → Secrets).")
+        st.stop()
+    if not key:
+        st.error("❗ SUPABASE_SERVICE_ROLE_KEY не задан (Settings → Secrets).")
+        st.stop()
+    return create_client(url, key)
+
+supabase = get_supabase()
+
+def auth_form():
+    """Простейшая форма входа/регистрации."""
+    st.header("🔐 Вход в аккаунт")
+
+    mode = st.segmented_control("Режим", ["Войти", "Регистрация"], key="auth_mode")
+    email = st.text_input("Email", key="auth_email")
+    password = st.text_input("Пароль", type="password", key="auth_password")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Войти", use_container_width=True, disabled=(mode!="Войти")):
+            try:
+                res = supabase.auth.sign_in_with_password({"email": email, "password": password})
+                st.session_state.auth_user = res.user.model_dump()  # сохраняем юзера в сессию
+                st.success("Готово! Вошли.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Не удалось войти: {e}")
+    with col2:
+        if st.button("Зарегистрироваться", use_container_width=True, disabled=(mode!="Регистрация")):
+            try:
+                res = supabase.auth.sign_up({"email": email, "password": password})
+                st.session_state.auth_user = res.user.model_dump()
+                st.success("Аккаунт создан, вы вошли.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Не удалось зарегистрироваться: {e}")
+
+def current_user_id() -> str | None:
+    """UUID пользователя из Supabase Auth (или None, если не залогинен)."""
+    u = st.session_state.get("auth_user")
+    if u and u.get("id"):
+        return u["id"]
+    # попытка освежить сессию (если вкладка перезагружена)
+    try:
+        res = supabase.auth.get_user()
+        if res and res.user:
+            st.session_state.auth_user = res.user.model_dump()
+            return res.user.id
+    except Exception:
+        pass
+    return None
+
+def logout_button():
+    if st.sidebar.button("Выйти", use_container_width=True):
+        try:
+            supabase.auth.sign_out()
+        except Exception:
+            pass
+        st.session_state.pop("auth_user", None)
+        st.rerun()
+
 # ========================= АВТОРИЗАЦИЯ / USER_ID =========================
 def get_current_user_id() -> str:
     # 1) если в секретах задан USER_ID — используем его (режим «один пользователь»)
@@ -56,24 +125,36 @@ def load_state_if_exists() -> bool:
     return False
 
 
+def db_save_state(user_id: str, data: dict):
+    supabase.table("rpg_state").upsert({"user_id": user_id, "data": data}).execute()
+
+def db_load_state(user_id: str) -> dict | None:
+    res = supabase.table("rpg_state").select("data").eq("user_id", user_id).execute()
+    if res.data:
+        return res.data[0]["data"]
+    return None
+
 def save_state():
-    user_id = get_current_user_id()
-    payload = serialize_state()
+    user_id = current_user_id()
+    if not user_id:
+        return  # если не авторизован, не сохраняем
     try:
-        db_save_state(user_id, payload)
-        return
+        db_save_state(user_id, serialize_state())
     except Exception as e:
         st.sidebar.warning(f"Не удалось сохранить в базу: {e}")
 
-    # fallback: локально
+def load_state_if_exists() -> bool:
+    user_id = current_user_id()
+    if not user_id:
+        return False
     try:
-        with open(STATE_FILE, "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False, indent=2)
+        data = db_load_state(user_id)
+        if data:
+            deserialize_state(data)
+            return True
     except Exception as e:
-        st.sidebar.warning(f"Не удалось сохранить локально: {e}")
-
-url = st.secrets["SUPABASE_URL"]
-key = st.secrets["SUPABASE_SERVICE_ROLE_KEY"]
+        st.sidebar.warning(f"Не удалось загрузить из базы: {e}")
+    return False
 
 supabase = create_client(url, key)
 
@@ -1833,6 +1914,15 @@ auto_check_yearly_reset()            # ⬅️ запуск годового сб
 
 # страховка: всегда есть "page"
 st.session_state.setdefault("page", "home")
+
+# === Проверка авторизации ===
+user_id = current_user_id()
+if not user_id:
+    auth_form()   # показываем форму логина/регистрации
+    st.stop()     # дальше код не идёт, пока не войдём
+
+# Если залогинены — даём кнопку выхода
+logout_button()
 
 # --- РОУТЕР ---
 st.session_state.setdefault("page", "home")
