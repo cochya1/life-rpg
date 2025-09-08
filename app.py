@@ -16,22 +16,30 @@ from supabase import create_client, Client
 
 @st.cache_resource
 def get_supabase() -> Client:
-    url = st.secrets.get("SUPABASE_URL", "").strip()
-    key = st.secrets.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
-    if not (url.startswith("https://") and url.endswith(".supabase.co")):
-        st.error("❗ SUPABASE_URL не задан/неверный (Manage app → Settings → Secrets).")
+    url = (st.secrets.get("SUPABASE_URL") or "").strip()
+    key = (st.secrets.get("SUPABASE_ANON_KEY") or "").strip()
+
+    # быстрые проверки, чтобы увидеть причину прямо в UI
+    if not url:
+        st.error("SUPABASE_URL не задан в Secrets.")
+        st.stop()
+    if not url.startswith("https://") or ".supabase.co" not in url:
+        st.error(f"SUPABASE_URL выглядит некорректно: {url}")
         st.stop()
     if not key:
-        st.error("❗ SUPABASE_SERVICE_ROLE_KEY не задан (Settings → Secrets).")
+        st.error("SUPABASE_ANON_KEY не задан в Secrets.")
         st.stop()
-    return create_client(url, key)
+
+    try:
+        return create_client(url, key)
+    except Exception as e:
+        st.error(f"Не удалось создать клиент Supabase: {e}")
+        st.stop()
 
 supabase = get_supabase()
 
 def auth_form():
-    """Простейшая форма входа/регистрации."""
     st.header("🔐 Вход в аккаунт")
-    # Если сегменты не поддерживаются твоей версией — замени на st.radio(...)
     try:
         mode = st.segmented_control("Режим", ["Войти", "Регистрация"], key="auth_mode")
     except Exception:
@@ -42,7 +50,8 @@ def auth_form():
 
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("Войти", use_container_width=True, disabled=(mode!="Войти" and mode!="Войти")):
+        disabled = (mode != "Войти") or (not email or not password)
+        if st.button("Войти", use_container_width=True, disabled=disabled):
             try:
                 res = supabase.auth.sign_in_with_password({"email": email, "password": password})
                 st.session_state.auth_user = res.user.model_dump()
@@ -50,8 +59,10 @@ def auth_form():
                 st.rerun()
             except Exception as e:
                 st.error(f"Не удалось войти: {e}")
+
     with col2:
-        if st.button("Зарегистрироваться", use_container_width=True, disabled=(mode!="Регистрация")):
+        disabled = (mode != "Регистрация") or (not email or not password)
+        if st.button("Зарегистрироваться", use_container_width=True, disabled=disabled):
             try:
                 res = supabase.auth.sign_up({"email": email, "password": password})
                 st.session_state.auth_user = res.user.model_dump()
