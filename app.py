@@ -13,12 +13,72 @@ from collections import Counter
 from supabase import create_client
 import streamlit as st
 
+# ========================= АВТОРИЗАЦИЯ / USER_ID =========================
+def get_current_user_id() -> str:
+    # 1) если в секретах задан USER_ID — используем его (режим «один пользователь»)
+    sid = st.secrets.get("USER_ID")
+    if sid:
+        return sid.strip().lower()
+
+    # 2) иначе — берём из session_state (если уже вошли)
+    if st.session_state.get("user_id"):
+        return st.session_state.user_id
+
+    # 3) иначе — покажем простую форму логина
+    st.header("🔐 Вход")
+    email = st.text_input("Введите e-mail (используется как идентификатор ваших данных)")
+    if st.button("Войти") and email.strip():
+        st.session_state.user_id = email.strip().lower()
+        st.rerun()
+
+    st.stop()  # останавливаем рендер до логина
+
+def load_state_if_exists() -> bool:
+    user_id = get_current_user_id()
+    try:
+        data = db_load_state(user_id)
+        if data:
+            deserialize_state(data)
+            return True
+    except Exception as e:
+        st.sidebar.warning(f"Не удалось загрузить из базы: {e}")
+
+    # fallback: локальный файл (для отладки)
+    if os.path.exists(STATE_FILE):
+        try:
+            with open(STATE_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            deserialize_state(data)
+            return True
+        except Exception as e:
+            st.sidebar.warning(f"Не удалось загрузить локально: {e}")
+
+    return False
+
+
+def save_state():
+    user_id = get_current_user_id()
+    payload = serialize_state()
+    try:
+        db_save_state(user_id, payload)
+        return
+    except Exception as e:
+        st.sidebar.warning(f"Не удалось сохранить в базу: {e}")
+
+    # fallback: локально
+    try:
+        with open(STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        st.sidebar.warning(f"Не удалось сохранить локально: {e}")
+
 url = st.secrets["SUPABASE_URL"]
 key = st.secrets["SUPABASE_SERVICE_ROLE_KEY"]
+
 supabase = create_client(url, key)
 
-# Проверка
-st.write("✅ Подключение к Supabase успешно!")
+# добавь это:
+USER_ID = st.secrets.get("USER_ID", "default_user")
 
 # Altair для пончиковых диаграмм
 import altair as alt

@@ -1,9 +1,11 @@
-# игнорируем секреты Streamlit
 .streamlit/secrets.toml
-
-# игнорируем временные файлы Python
 __pycache__/
 *.pyc
-
-# игнорируем системные файлы
+.venv/
+venv/
 .DS_Store
+state.json
+
+git rm -r --cached .venv __pycache__ state.json
+git commit -m "remove large ignored files"
+
