@@ -13,7 +13,7 @@ from collections import Counter
 from supabase import create_client
 import streamlit as st
 
-# ---------- SUPABASE AUTH ----------
+# ---------- SUPABASE AUTH (инициализация клиента) ----------
 from supabase import create_client, Client
 
 @st.cache_resource
@@ -21,7 +21,7 @@ def get_supabase() -> Client:
     url = st.secrets.get("SUPABASE_URL", "").strip()
     key = st.secrets.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
     if not (url.startswith("https://") and url.endswith(".supabase.co")):
-        st.error("❗ SUPABASE_URL не задан или неверный (Settings → Secrets).")
+        st.error("❗ SUPABASE_URL не задан/неверный (Manage app → Settings → Secrets).")
         st.stop()
     if not key:
         st.error("❗ SUPABASE_SERVICE_ROLE_KEY не задан (Settings → Secrets).")
