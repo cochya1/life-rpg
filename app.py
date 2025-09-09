@@ -92,7 +92,7 @@ def current_user_id() -> str | None:
     return None
 
 def logout_button():
-    if st.sidebar.button("Выйти", use_container_width=True):
+    if st.sidebar.button("Выйти", key="btn_logout", use_container_width=True):
         try:
             supabase.auth.sign_out()
         except Exception:
