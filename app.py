@@ -10,22 +10,21 @@ import pandas as pd
 from datetime import datetime, date, timedelta
 from zoneinfo import ZoneInfo
 from collections import Counter
-from datetime import time as dtime
 
-def goal_due_datetime(goal) -> datetime:
+def goal_due_datetime(g):
     """
-    Возвращает полноценный datetime дедлайна задачи.
-    Если время не задано — считаем 23:59:59 этого дня.
+    Возвращает datetime дедлайна задачи:
+    - если задано g['due_time'] (строка 'HH:MM'), возьмём эту точку времени,
+    - иначе считаем дедлайн до конца дня (23:59:59), чтобы без времени задача была «на весь день».
     """
-    dd: date = goal["due"]
-    tstr = goal.get("time")
-    if tstr:
-        try:
-            hh, mm = map(int, tstr.split(":"))
-            return datetime.combine(dd, dtime(hh, mm))
-        except Exception:
-            pass
-    return datetime.combine(dd, dtime(23, 59, 59))
+    from datetime import datetime, time as dtime
+    due_date = g["due"]  # это уже date
+    t = g.get("due_time")
+    if t:
+        hh, mm = map(int, t.split(":"))
+        return datetime.combine(due_date, dtime(hour=hh, minute=mm))
+    else:
+        return datetime.combine(due_date, dtime(23, 59, 59))
 
 # ---------- SUPABASE AUTH (инициализация клиента) ----------
 from supabase import create_client, Client
@@ -685,7 +684,7 @@ def _day_done_ok(the_day: date) -> bool:
 def auto_process_overdues():
     """Штрафуем и переносим просроченные задачи; одноразовые — помечаем проваленными."""
     changed = False
-    today = date.today()
+    today_d = date.today()
     now_dt = datetime.now()
 
     for g in st.session_state.goals:
@@ -693,16 +692,19 @@ def auto_process_overdues():
             continue
 
         due_dt = goal_due_datetime(g)
-        if due_dt.date() < today or (due_dt.date() == today and due_dt < now_dt):
+
+        # просрочка: либо дата в прошлом, либо сегодня, но время уже прошло
+        if due_dt.date() < today_d or (due_dt.date() == today_d and due_dt < now_dt):
             reward = GOAL_TYPES[g["type"]]
             if g.get("recur_mode", "none") != "none":
-                # повторяемые — за каждый пропуск
+                # повторяемые — переносим вперёд, штрафуя за каждый пропуск (пока дедлайн < сейчас)
                 while due_dt < now_dt:
                     add_xp(-reward)
                     update_stat(g["stat"], -1)
                     update_stat("Дисциплина 🎯", -0.1)
-                    g["due"] = compute_next_due(g)
-                    due_dt = goal_due_datetime(g)
+                    g["due"] = compute_next_due(g)     # переносим дату
+                    # время сохраняем как есть (g['due_time'])
+                    due_dt = goal_due_datetime(g)       # пересобираем due_dt
                     g["type"] = classify_by_due(g["due"])
                     changed = True
                 g["overdue"] = False
@@ -823,14 +825,20 @@ def render_list(goals, scope: str):
 
 # ========================= ФОРМА ДОБАВЛЕНИЯ =========================
 def render_add_task_form(suffix: str = ""):
-    """Форма для добавления новой задачи (ключи уникальны за счёт suffix)"""
-
+    """Форма для добавления новой задачи (с опциональным временем)."""
     with st.form(f"add_goal_form{suffix}", clear_on_submit=True):
         st.subheader("➕ Добавить задачу")
 
-        # Поля формы
         title = st.text_input("Название задачи", key=f"title{suffix}")
-        due_input = st.date_input("Дедлайн", value=date.today(), key=f"due{suffix}")
+        due_input = st.date_input("Дедлайн (дата)", value=date.today(), key=f"due{suffix}")
+
+        # <-- Важно: чекбокс и time_input ДО кнопки отправки, внутри form
+        use_time = st.checkbox("Указать время", value=False, key=f"use_time{suffix}")
+        if use_time:
+            time_val = st.time_input("Время", key=f"time{suffix}")
+        else:
+            time_val = None
+
         characteristic = st.selectbox(
             "Какая характеристика качается:",
             ["Здоровье ❤️", "Интеллект 🧠", "Радость 🙂", "Отношения 🤝", "Успех ⭐", "Дисциплина 🎯"],
@@ -842,7 +850,6 @@ def render_add_task_form(suffix: str = ""):
             key=f"cat{suffix}"
         )
 
-        # Режим повторения
         RECUR_OPTIONS = {
             "Не повторять": "none",
             "Ежедневно": "daily",
@@ -862,19 +869,11 @@ def render_add_task_form(suffix: str = ""):
             st.markdown("**Выберите дни недели:**")
             checks = []
             cols = st.columns(7)
-            for i, day in enumerate(["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]):
+            for i, day_name in enumerate(["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]):
                 with cols[i]:
-                    checked = st.checkbox(day, key=f"day_{i}{suffix}")
-                    if checked:
+                    if st.checkbox(day_name, key=f"day_{i}{suffix}"):
                         checks.append(i)
             recur_days = checks
-        
-        use_time = st.checkbox("Указать время", key=f"use_time{suffix}")
-        tvalue = None
-        if use_time:
-            t = st.time_input("Время дедлайна", key=f"time{suffix}")
-            # st.time_input возвращает datetime.time — сохраним строкой HH:MM
-            tvalue = f"{t.hour:02d}:{t.minute:02d}"
 
         submitted = st.form_submit_button("Добавить задачу", use_container_width=True, key=f"submit{suffix}")
 
@@ -893,10 +892,9 @@ def render_add_task_form(suffix: str = ""):
                     "stat": characteristic,
                     "recur_mode": mode_key,
                     "recur_days": recur_days,
-                    "time": tvalue,  # <— НОВОЕ (может быть None)
-}
-
-
+                    # Сохраняем время как строку 'HH:MM' или None
+                    "due_time": time_val.strftime("%H:%M") if time_val else None,
+                }
                 st.session_state.goals.append(new_goal)
                 save_state()
                 st.success(f"✅ Задача '{title}' добавлена!")
@@ -1158,11 +1156,20 @@ def render_today_tasks_section():
     """Красивые карточки задач на сегодня с кнопками ✔ / ✖."""
     st.subheader("📅 Задачи на сегодня")
 
-    today = date.today()
     today_tasks = [
-        g for g in st.session_state.goals
-        if g["due"] == today and not g["done"] and not g["failed"]
-    ]
+    g for g in st.session_state.goals
+    if (g["due"] == today) and (not g["done"]) and (not g["failed"])
+]
+
+# сортируем: сначала по времени (None в конец), потом по категории
+def _sort_key(g):
+    t = g.get("due_time")
+    # None -> '99:99' чтобы уходили вниз
+    t_key = t if isinstance(t, str) else "99:99"
+    return (t_key, g.get("category", ""))
+
+for g in sorted(today_tasks, key=_sort_key):
+
 
     st.markdown("""
     <style>
