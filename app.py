@@ -686,21 +686,23 @@ def auto_process_overdues():
     """Штрафуем и переносим просроченные задачи; одноразовые — помечаем проваленными."""
     changed = False
     today = date.today()
+    now_dt = datetime.now()
 
     for g in st.session_state.goals:
         if g["done"] or g["failed"]:
             continue
-        now_dt = datetime.now()
-            due_dt = goal_due_datetime(g)
-            if due_dt.date() < today or (due_dt.date() == today and due_dt < now_dt):
-    # т.е. просрочено, если день в прошлом, или сегодня, но время уже прошло
 
+        due_dt = goal_due_datetime(g)
+        if due_dt.date() < today or (due_dt.date() == today and due_dt < now_dt):
+            reward = GOAL_TYPES[g["type"]]
+            if g.get("recur_mode", "none") != "none":
                 # повторяемые — за каждый пропуск
-                while g["due"] < today:
+                while due_dt < now_dt:
                     add_xp(-reward)
                     update_stat(g["stat"], -1)
                     update_stat("Дисциплина 🎯", -0.1)
                     g["due"] = compute_next_due(g)
+                    due_dt = goal_due_datetime(g)
                     g["type"] = classify_by_due(g["due"])
                     changed = True
                 g["overdue"] = False
