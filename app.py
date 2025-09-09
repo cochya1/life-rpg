@@ -10,6 +10,22 @@ import pandas as pd
 from datetime import datetime, date, timedelta
 from zoneinfo import ZoneInfo
 from collections import Counter
+from datetime import time as dtime
+
+def goal_due_datetime(goal) -> datetime:
+    """
+    Возвращает полноценный datetime дедлайна задачи.
+    Если время не задано — считаем 23:59:59 этого дня.
+    """
+    dd: date = goal["due"]
+    tstr = goal.get("time")
+    if tstr:
+        try:
+            hh, mm = map(int, tstr.split(":"))
+            return datetime.combine(dd, dtime(hh, mm))
+        except Exception:
+            pass
+    return datetime.combine(dd, dtime(23, 59, 59))
 
 # ---------- SUPABASE AUTH (инициализация клиента) ----------
 from supabase import create_client, Client
@@ -152,14 +168,45 @@ def award_big_goal_failure():
         update_stat(k, -BIG_GOAL_STAT_BONUS)
 
 # ========================= УТИЛИТЫ =========================
-def days_left_text(due: date) -> str:
-    d = (due - date.today()).days
-    if d > 0:
-        return f"осталось {d} дн."
-    if d == 0:
-        return "сегодня дедлайн"
-    return f"просрочена на {-d} дн."
-
+def days_left_text(due: date, time_str: str | None = None) -> str:
+    """
+    Если задано время — показываем точнее (сегодня/через X часов/просрочена на ...).
+    Без времени — старая логика по дням.
+    """
+    if time_str:
+        try:
+            hh, mm = map(int, time_str.split(":"))
+            dt_due = datetime.combine(due, dtime(hh, mm))
+        except Exception:
+            dt_due = datetime.combine(due, dtime(23, 59, 59))
+        delta = dt_due - datetime.now()
+        s = int(delta.total_seconds())
+        if s > 0:
+            days = s // 86400
+            if days > 0:
+                return f"осталось {days} дн."
+            hours = s // 3600
+            if hours > 0:
+                return f"через {hours} ч."
+            mins = max(1, (s % 3600) // 60)
+            return f"через {mins} мин."
+        else:
+            s = -s
+            days = s // 86400
+            if days > 0:
+                return f"просрочена на {days} дн."
+            hours = s // 3600
+            if hours > 0:
+                return f"просрочена на {hours} ч."
+            mins = max(1, (s % 3600) // 60)
+            return f"просрочена на {mins} мин."
+    else:
+        d = (due - date.today()).days
+        if d > 0:
+            return f"осталось {d} дн."
+        if d == 0:
+            return "сегодня дедлайн"
+        return f"просрочена на {-d} дн."
 
 def classify_by_due(due: date) -> str:
     left = (due - date.today()).days
@@ -396,20 +443,21 @@ def serialize_state():
         "level": st.session_state.level,
         "stats": st.session_state.stats,
         "goals": [
-            {
-                "title": g["title"],
-                "due": g["due"].isoformat(),
-                "type": g["type"],
-                "category": g.get("category", "Прочее"),
-                "done": g["done"],
-                "failed": g["failed"],
-                "overdue": g.get("overdue", False),
-                "stat": g["stat"],
-                "recur_mode": g.get("recur_mode", "none"),
-                "recur_days": g.get("recur_days", []),
-            }
-            for g in st.session_state.goals
-        ],
+    {
+        "title": g["title"],
+        "due": g["due"].isoformat(),
+        "type": g["type"],
+        "category": g.get("category", "Прочее"),
+        "done": g["done"],
+        "failed": g["failed"],
+        "overdue": g.get("overdue", False),
+        "stat": g["stat"],
+        "recur_mode": g.get("recur_mode", "none"),
+        "recur_days": g.get("recur_days", []),
+        "time": g.get("time"),  # <— НОВОЕ
+    }
+    for g in st.session_state.goals
+    ],
         "xp_log": st.session_state.xp_log,
         "discipline_awarded_dates": st.session_state.discipline_awarded_dates,
 
@@ -455,22 +503,22 @@ def deserialize_state(data: dict):
     )
 
     # обычные задачи
-    st.session_state.goals = []
-    for g in data.get("goals", []):
-        st.session_state.goals.append(
-            {
-                "title": g["title"],
-                "due": date.fromisoformat(g["due"]),
-                "type": g["type"],
-                "category": g.get("category", "Прочее"),
-                "done": g.get("done", False),
-                "failed": g.get("failed", False),
-                "overdue": g.get("overdue", False),
-                "stat": g.get("stat", "Успех ⭐"),
-                "recur_mode": g.get("recur_mode", "none"),
-                "recur_days": g.get("recur_days", []),
-            }
-        )
+    st.session_state.goals.append(
+    {
+        "title": g["title"],
+        "due": date.fromisoformat(g["due"]),
+        "type": g["type"],
+        "category": g.get("category", "Прочее"),
+        "done": g.get("done", False),
+        "failed": g.get("failed", False),
+        "overdue": g.get("overdue", False),
+        "stat": g.get("stat", "Успех ⭐"),
+        "recur_mode": g.get("recur_mode", "none"),
+        "recur_days": g.get("recur_days", []),
+        "time": g.get("time"),  # <— НОВОЕ
+    }
+    )
+
 
     # xp_log (ВЫРОВНЯН по уровню функции)
     xp_src = data.get("xp_log", {})
@@ -642,9 +690,11 @@ def auto_process_overdues():
     for g in st.session_state.goals:
         if g["done"] or g["failed"]:
             continue
-        if g["due"] < today:
-            reward = GOAL_TYPES[g["type"]]
-            if g.get("recur_mode", "none") != "none":
+        now_dt = datetime.now()
+            due_dt = goal_due_datetime(g)
+            if due_dt.date() < today or (due_dt.date() == today and due_dt < now_dt):
+    # т.е. просрочено, если день в прошлом, или сегодня, но время уже прошло
+
                 # повторяемые — за каждый пропуск
                 while g["due"] < today:
                     add_xp(-reward)
@@ -725,7 +775,10 @@ def row(goal, scope: str, idx: int):
             f"🏷️ {goal.get('category','')}"
         )
 
-    mid.caption(f"📅 {goal['due'].strftime('%d-%m-%Y')} • {days_left_text(goal['due'])}")
+    time_str = goal.get("time")
+    time_part = f" • ⏰ {time_str}" if time_str else ""
+    mid.caption(f"📅 {goal['due'].strftime('%d-%m-%Y')}{time_part} • {days_left_text(goal['due'], time_str)}")
+
 
     uid = goal_uid(goal)
 
@@ -761,7 +814,7 @@ def render_list(goals, scope: str):
     if not goals:
         st.caption("Нет задач в этом списке.")
         return
-    goals = sorted(goals, key=lambda g: g["due"])
+    goals = sorted(goals, key=lambda g: goal_due_datetime(g))
     for i, g in enumerate(goals):
         row(g, scope, i)
 
@@ -813,6 +866,13 @@ def render_add_task_form(suffix: str = ""):
                     if checked:
                         checks.append(i)
             recur_days = checks
+        
+        use_time = st.checkbox("Указать время", key=f"use_time{suffix}")
+        tvalue = None
+        if use_time:
+            t = st.time_input("Время дедлайна", key=f"time{suffix}")
+            # st.time_input возвращает datetime.time — сохраним строкой HH:MM
+            tvalue = f"{t.hour:02d}:{t.minute:02d}"
 
         submitted = st.form_submit_button("Добавить задачу", use_container_width=True, key=f"submit{suffix}")
 
@@ -831,7 +891,9 @@ def render_add_task_form(suffix: str = ""):
                     "stat": characteristic,
                     "recur_mode": mode_key,
                     "recur_days": recur_days,
-                }
+                    "time": tvalue,  # <— НОВОЕ (может быть None)
+}
+
 
                 st.session_state.goals.append(new_goal)
                 save_state()
@@ -1127,6 +1189,12 @@ def render_today_tasks_section():
         uid = goal_uid(g)
         reward = GOAL_TYPES.get(g["type"], 5)
         due_str = g["due"].strftime("%d-%m-%Y")
+        time_str = g.get("time")
+        time_part = f" ⏰ {time_str}" if time_str else ""
+        status_tail = days_left_text(g["due"], time_str)
+        ...
+        f'    <div class="meta">{g.get("stat","")} • дедлайн: {due_str}{time_part} • {status_tail}</div>'
+
 
         with st.container():
             st.markdown('<div class="task-card">', unsafe_allow_html=True)
