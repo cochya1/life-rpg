@@ -100,15 +100,6 @@ def logout_button():
         st.session_state.pop("auth_user", None)
         st.rerun()
 
-# === Проверка авторизации ===
-user_id = current_user_id()
-if not user_id:
-    auth_form()   # показываем форму логина/регистрации
-    st.stop()     # дальше код не идёт, пока не войдём
-
-# Кнопка выхода в сайдбаре
-logout_button()
-
 # ---------- ХРАНИЛКА В SUPABASE ----------
 def db_save_state(user_id: str, data: dict):
     supabase.table("rpg_state").upsert({"user_id": user_id, "data": data}).execute()
