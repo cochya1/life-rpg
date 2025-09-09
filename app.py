@@ -109,6 +109,29 @@ if not user_id:
 # Кнопка выхода в сайдбаре
 logout_button()
 
+def _bootstrap_state():
+    ss = st.session_state
+    ss.setdefault("goals", [])
+    ss.setdefault("big_goals", [])
+    ss.setdefault("habits", [])
+    ss.setdefault("xp", 0)
+    ss.setdefault("level", 1)
+    ss.setdefault("stats", _default_stats_dict())
+    ss.setdefault("xp_log", {})
+    ss.setdefault("discipline_awarded_dates", [])
+    ss.setdefault("levelup_pending", False)
+    ss.setdefault("levelup_to", 1)
+    ss.setdefault("last_reset_year", None)
+    ss.setdefault("year_reset_pending", False)
+    ss.setdefault("yearly_report_year", None)
+    ss.setdefault("page", "home")
+    ss.setdefault("show_add_form", False)
+    ss.setdefault("show_visual", False)
+
+_bootstrap_state()
+
+loaded = load_state_if_exists()
+
 # ---------- ХРАНИЛКА В SUPABASE ----------
 def db_save_state(user_id: str, data: dict):
     supabase.table("rpg_state").upsert({"user_id": user_id, "data": data}).execute()
