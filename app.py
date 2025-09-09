@@ -1156,20 +1156,11 @@ def render_today_tasks_section():
     """Красивые карточки задач на сегодня с кнопками ✔ / ✖."""
     st.subheader("📅 Задачи на сегодня")
 
+    today = date.today()
     today_tasks = [
-    g for g in st.session_state.goals
-    if (g["due"] == today) and (not g["done"]) and (not g["failed"])
-]
-
-# сортируем: сначала по времени (None в конец), потом по категории
-def _sort_key(g):
-    t = g.get("due_time")
-    # None -> '99:99' чтобы уходили вниз
-    t_key = t if isinstance(t, str) else "99:99"
-    return (t_key, g.get("category", ""))
-
-for g in sorted(today_tasks, key=_sort_key):
-
+        g for g in st.session_state.goals
+        if g["due"] == today and not g["done"] and not g["failed"]
+    ]
 
     st.markdown("""
     <style>
@@ -1192,18 +1183,22 @@ for g in sorted(today_tasks, key=_sort_key):
 
     if not today_tasks:
         st.info("Сегодня задач нет! 🎉")
-        return
+        return  # ← теперь это внутри функции, всё ок
 
     for g in sorted(today_tasks, key=lambda x: x.get("category", "")):
         uid = goal_uid(g)
         reward = GOAL_TYPES.get(g["type"], 5)
-        due_str = g["due"].strftime("%d-%m-%Y")
-        time_str = g.get("time")
-        time_part = f" ⏰ {time_str}" if time_str else ""
-        status_tail = days_left_text(g["due"], time_str)
-        ...
-        f'    <div class="meta">{g.get("stat","")} • дедлайн: {due_str}{time_part} • {status_tail}</div>'
 
+        # дата + (опционально) время
+        due_str = g["due"].strftime("%d-%m-%Y")
+        t = g.get("due_time")
+        if t:
+            if isinstance(t, dict):
+                hh = int(t.get("hour", 0))
+                mm = int(t.get("minute", 0))
+                due_str += f" {hh:02d}:{mm:02d}"
+            else:
+                due_str += f" {str(t)[:5]}"
 
         with st.container():
             st.markdown('<div class="task-card">', unsafe_allow_html=True)
