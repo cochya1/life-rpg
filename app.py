@@ -186,7 +186,7 @@ def compute_next_due(goal) -> date:
     if mode == "daily":
         return goal["due"] + timedelta(days=1)
     elif mode == "weekly":
-        return goal["due"] + timedelta(days=7)            # ← добавь это
+        return goal["due"] + timedelta(days=7)            
     elif mode == "by_days":
         return next_from_days(goal["due"], goal.get("recur_days", []))
     return goal["due"]
