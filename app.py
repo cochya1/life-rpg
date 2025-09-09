@@ -110,6 +110,121 @@ def db_load_state(user_id: str) -> dict | None:
         return res.data[0]["data"]
     return None
 
+# ========================= СОХРАНЕНИЕ/ЗАГРУЗКА =========================
+def serialize_state():
+    return {
+        "xp": st.session_state.xp,
+        "level": st.session_state.level,
+        "stats": st.session_state.stats,
+        "goals": [
+            {
+                "title": g["title"],
+                "due": g["due"].isoformat(),
+                "type": g["type"],
+                "category": g.get("category", "Прочее"),
+                "done": g["done"],
+                "failed": g["failed"],
+                "overdue": g.get("overdue", False),
+                "stat": g["stat"],
+                "recur_mode": g.get("recur_mode", "none"),
+                "recur_days": g.get("recur_days", []),
+                "time": g.get("time"),
+            }
+            for g in st.session_state.goals
+        ],
+        "xp_log": st.session_state.xp_log,
+        "discipline_awarded_dates": st.session_state.discipline_awarded_dates,
+        "big_goals": [
+            {
+                "title": g["title"],
+                "due": g["due"].isoformat(),
+                "done": g["done"],
+                "failed": g["failed"],
+                "note": g.get("note", ""),
+            }
+            for g in st.session_state.get("big_goals", [])
+        ],
+        "habits": [
+            {
+                "title": h["title"],
+                "days": h.get("days", []),
+                "stat": h.get("stat", "Дисциплина 🎯"),
+                "completions": h.get("completions", []),
+                "failures": h.get("failures", []),
+            }
+            for h in st.session_state.get("habits", [])
+        ],
+    }
+
+
+def deserialize_state(data: dict):
+    st.session_state.xp = int(data.get("xp", 0))
+    st.session_state.level = int(data.get("level", 1))
+    st.session_state.stats = data.get(
+        "stats",
+        {
+            "Здоровье ❤️": 0,
+            "Интеллект 🧠": 0,
+            "Радость 🙂": 0,
+            "Отношения 🤝": 0,
+            "Успех ⭐": 0,
+            "Дисциплина 🎯": 0.0,
+        },
+    )
+
+    st.session_state.goals = []
+    for g in data.get("goals", []):
+        st.session_state.goals.append(
+            {
+                "title": g["title"],
+                "due": date.fromisoformat(g["due"]),
+                "type": g["type"],
+                "category": g.get("category", "Прочее"),
+                "done": g.get("done", False),
+                "failed": g.get("failed", False),
+                "overdue": g.get("overdue", False),
+                "stat": g.get("stat", "Успех ⭐"),
+                "recur_mode": g.get("recur_mode", "none"),
+                "recur_days": g.get("recur_days", []),
+                "time": g.get("time"),
+            }
+        )
+
+    xp_src = data.get("xp_log", {})
+    if isinstance(xp_src, dict):
+        st.session_state.xp_log = {str(k): int(v) for k, v in xp_src.items()}
+    else:
+        try:
+            st.session_state.xp_log = {str(k): int(v) for k, v in xp_src}
+        except Exception:
+            st.session_state.xp_log = {}
+
+    st.session_state.discipline_awarded_dates = data.get("discipline_awarded_dates", [])
+
+    st.session_state.big_goals = []
+    for g in data.get("big_goals", []):
+        st.session_state.big_goals.append(
+            {
+                "title": g["title"],
+                "due": date.fromisoformat(g["due"]),
+                "done": g.get("done", False),
+                "failed": g.get("failed", False),
+                "note": g.get("note", ""),
+            }
+        )
+
+    st.session_state.habits = []
+    for h in data.get("habits", []):
+        st.session_state.habits.append(
+            {
+                "title": h["title"],
+                "days": h.get("days", []),
+                "stat": h.get("stat", "Дисциплина 🎯"),
+                "completions": list(h.get("completions", [])),
+                "failures": list(h.get("failures", [])),
+            }
+        )
+
 def save_state():
     user_id = current_user_id()
     if not user_id:
@@ -272,9 +387,6 @@ logout_button()
 
 # ВАЖНО: сначала бутстрап
 _bootstrap_state()
-
-# Потом — загрузка состояния из базы
-loaded = load_state_if_exists()
 
 def export_year_report_xlsx(archive: dict, year: int) -> bytes:
     """
@@ -459,125 +571,6 @@ def render_year_reset_modal():
         st.session_state.yearly_report_bytes = b""
         save_state()
         st.rerun()
-
-# ========================= СОХРАНЕНИЕ/ЗАГРУЗКА =========================
-def serialize_state():
-    return {
-        "xp": st.session_state.xp,
-        "level": st.session_state.level,
-        "stats": st.session_state.stats,
-        "goals": [
-    {
-        "title": g["title"],
-        "due": g["due"].isoformat(),
-        "type": g["type"],
-        "category": g.get("category", "Прочее"),
-        "done": g["done"],
-        "failed": g["failed"],
-        "overdue": g.get("overdue", False),
-        "stat": g["stat"],
-        "recur_mode": g.get("recur_mode", "none"),
-        "recur_days": g.get("recur_days", []),
-        "time": g.get("time"),  # <— НОВОЕ
-    }
-    for g in st.session_state.goals
-    ],
-        "xp_log": st.session_state.xp_log,
-        "discipline_awarded_dates": st.session_state.discipline_awarded_dates,
-
-        # глобальные цели
-        "big_goals": [
-            {
-                "title": g["title"],
-                "due": g["due"].isoformat(),
-                "done": g["done"],
-                "failed": g["failed"],
-                "note": g.get("note", ""),
-            }
-            for g in st.session_state.get("big_goals", [])
-        ],
-
-        # привычки
-        "habits": [
-            {
-                "title": h["title"],
-                "days": h.get("days", []),
-                "stat": h.get("stat", "Дисциплина 🎯"),
-                "completions": h.get("completions", []),
-                "failures": h.get("failures", []),
-            }
-            for h in st.session_state.get("habits", [])
-        ],
-    }
-
-
-def deserialize_state(data: dict):
-    st.session_state.xp = int(data.get("xp", 0))
-    st.session_state.level = int(data.get("level", 1))
-    st.session_state.stats = data.get(
-        "stats",
-        {
-            "Здоровье ❤️": 0,
-            "Интеллект 🧠": 0,
-            "Радость 🙂": 0,
-            "Отношения 🤝": 0,
-            "Успех ⭐": 0,
-            "Дисциплина 🎯": 0.0,
-        },
-    )
-
-    # обычные задачи
-    st.session_state.goals.append(
-    {
-        "title": g["title"],
-        "due": date.fromisoformat(g["due"]),
-        "type": g["type"],
-        "category": g.get("category", "Прочее"),
-        "done": g.get("done", False),
-        "failed": g.get("failed", False),
-        "overdue": g.get("overdue", False),
-        "stat": g.get("stat", "Успех ⭐"),
-        "recur_mode": g.get("recur_mode", "none"),
-        "recur_days": g.get("recur_days", []),
-        "time": g.get("time"),  # <— НОВОЕ
-    }
-    )
-
-
-    # xp_log (ВЫРОВНЯН по уровню функции)
-    xp_src = data.get("xp_log", {})
-    if isinstance(xp_src, dict):
-        st.session_state.xp_log = {str(k): int(v) for k, v in xp_src.items()}
-    else:
-        try:
-            st.session_state.xp_log = {str(k): int(v) for k, v in xp_src}
-        except Exception:
-            st.session_state.xp_log = {}
-
-    # дисциплина
-    st.session_state.discipline_awarded_dates = data.get("discipline_awarded_dates", [])
-
-    # глобальные цели
-    st.session_state.big_goals = []
-    for g in data.get("big_goals", []):
-        st.session_state.big_goals.append({
-            "title": g["title"],
-            "due": date.fromisoformat(g["due"]),
-            "done": g.get("done", False),
-            "failed": g.get("failed", False),
-            "note": g.get("note", ""),
-        })
-
-        # привычки
-    st.session_state.habits = []
-    for h in data.get("habits", []):
-        st.session_state.habits.append({
-            "title": h["title"],
-            "days": h.get("days", []),
-            "stat": h.get("stat", "Дисциплина 🎯"),
-            "completions": list(h.get("completions", [])),
-            "failures": list(h.get("failures", [])),
-        })
 
 # ========================= XP / СТАТЫ =========================
 def ensure_xp_log_dict():
