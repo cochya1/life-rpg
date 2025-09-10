@@ -128,6 +128,7 @@ def serialize_state():
                 "stat": g["stat"],
                 "recur_mode": g.get("recur_mode", "none"),
                 "recur_days": g.get("recur_days", []),
+                "due_time": g.get("due_time"),
                 "time": g.get("time"),
             }
             for g in st.session_state.goals
@@ -187,6 +188,7 @@ def deserialize_state(data: dict):
                 "recur_mode": g.get("recur_mode", "none"),
                 "recur_days": g.get("recur_days", []),
                 "time": g.get("time"),
+                "due_time": g.get("due_time") or g.get("time"),
             }
         )
 
@@ -1211,9 +1213,9 @@ def render_today_tasks_section():
             if isinstance(t, dict):
                 hh = int(t.get("hour", 0))
                 mm = int(t.get("minute", 0))
-                due_str += f" {hh:02d}:{mm:02d}"
+                due_str += f" ⏰ {hh:02d}:{mm:02d}"
             else:
-                due_str += f" {str(t)[:5]}"
+                due_str += f" ⏰ {str(t)[:5]}"
 
         with st.container():
             st.markdown('<div class="task-card">', unsafe_allow_html=True)
