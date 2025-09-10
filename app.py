@@ -19,7 +19,7 @@ def goal_due_datetime(g):
     """
     from datetime import datetime, time as dtime
     due_date = g["due"]  # это уже date
-    t = g.get("due_time")
+    t = g.get("due_time") or g.get("time")
     if t:
         hh, mm = map(int, t.split(":"))
         return datetime.combine(due_date, dtime(hour=hh, minute=mm))
@@ -797,7 +797,7 @@ def row(goal, scope: str, idx: int):
             f"🏷️ {goal.get('category','')}"
         )
 
-    time_str = goal.get("time")
+    time_str = goal.get("due_time") or goal.get("time")
     time_part = f" • ⏰ {time_str}" if time_str else ""
     mid.caption(f"📅 {goal['due'].strftime('%d-%m-%Y')}{time_part} • {days_left_text(goal['due'], time_str)}")
 
@@ -843,19 +843,16 @@ def render_list(goals, scope: str):
 
 # ========================= ФОРМА ДОБАВЛЕНИЯ =========================
 def render_add_task_form(suffix: str = ""):
-    """Форма для добавления новой задачи (с опциональным временем)."""
+    """Форма для добавления новой задачи (с выбором времени либо без него)."""
     with st.form(f"add_goal_form{suffix}", clear_on_submit=True):
         st.subheader("➕ Добавить задачу")
 
         title = st.text_input("Название задачи", key=f"title{suffix}")
         due_input = st.date_input("Дедлайн (дата)", value=date.today(), key=f"due{suffix}")
 
-        # <-- Важно: чекбокс и time_input ДО кнопки отправки, внутри form
-        use_time = st.checkbox("Указать время", value=False, key=f"use_time{suffix}")
-        if use_time:
-            time_val = st.time_input("Время", key=f"time{suffix}")
-        else:
-            time_val = None
+        time_options = ["Без времени"] + [f"{h:02d}:{m:02d}" for h in range(24) for m in (0, 30)]
+        time_choice = st.selectbox("Время", time_options, key=f"time{suffix}")
+        time_val = None if time_choice == "Без времени" else datetime.strptime(time_choice, "%H:%M").time()
 
         characteristic = st.selectbox(
             "Какая характеристика качается:",
@@ -1209,7 +1206,7 @@ def render_today_tasks_section():
 
         # дата + (опционально) время
         due_str = g["due"].strftime("%d-%m-%Y")
-        t = g.get("due_time")
+        t = g.get("due_time") or g.get("time")
         if t:
             if isinstance(t, dict):
                 hh = int(t.get("hour", 0))
