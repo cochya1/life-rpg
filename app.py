@@ -7,7 +7,7 @@ import os
 import io
 import pandas as pd
 
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, time as dtime
 from zoneinfo import ZoneInfo
 from collections import Counter
 
