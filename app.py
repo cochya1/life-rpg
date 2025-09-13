@@ -821,7 +821,7 @@ def row(goal, scope: str, idx: int):
     reward = GOAL_TYPES[goal["type"]]
     status = "✅" if goal["done"] else ("❌" if goal["failed"] else ("⏰" if goal.get("overdue") else "⬜"))
 
-    left, mid, up, down, b1, b2, b3 = st.columns([6, 3, 1, 1, 1, 1, 1])
+    left, mid, up, down, edit_col, b1, b2, b3 = st.columns([6, 3, 1, 1, 1, 1, 1, 1])
 
     with left:
         if goal["due"] == date.today() and not goal["done"] and not goal["failed"]:
@@ -846,6 +846,10 @@ def row(goal, scope: str, idx: int):
         _move_goal_in_scope(goal, scope, -1)
     if down.button("⬇️", key=f"{scope}_down_{uid}_{idx}", use_container_width=True):
         _move_goal_in_scope(goal, scope, +1)
+
+    if edit_col.button("✏️", key=f"{scope}_edit_{uid}_{idx}", use_container_width=True, help="Редактировать"):
+        st.session_state.edit_goal_uid = uid
+        st.rerun()
 
     if not goal["done"] and not goal["failed"]:
         if b1.button("✅", key=f"{scope}_done_{uid}_{idx}", use_container_width=True, help="Выполнить"):
@@ -874,6 +878,9 @@ def row(goal, scope: str, idx: int):
         st.session_state.goals = [g for g in st.session_state.goals if g is not goal]
         save_state()
         st.rerun()
+
+    if st.session_state.get("edit_goal_uid") == uid:
+        render_edit_goal_form(goal, uid)
 
 def render_list(goals, scope: str):
     if not goals:
@@ -956,6 +963,90 @@ def render_add_task_form(suffix: str = ""):
                 save_state()
                 st.success(f"✅ Задача '{title}' добавлена!")
                 st.rerun()
+
+def render_edit_goal_form(goal: dict, uid: str):
+    """Форма редактирования существующей задачи."""
+    with st.form(f"edit_goal_form_{uid}"):
+        st.subheader("✏️ Редактировать задачу")
+
+        title = st.text_input("Название задачи", value=goal["title"], key=f"edit_title_{uid}")
+        due_input = st.date_input("Дедлайн (дата)", value=goal["due"], key=f"edit_due_{uid}")
+
+        time_options = ["Без времени"] + [f"{h:02d}:{m:02d}" for h in range(24) for m in (0, 30)]
+        current_time = goal.get("due_time") or "Без времени"
+        time_index = time_options.index(current_time) if current_time in time_options else 0
+        time_choice = st.selectbox("Время", time_options, index=time_index, key=f"edit_time_{uid}")
+        time_val = None if time_choice == "Без времени" else datetime.strptime(time_choice, "%H:%M").time()
+
+        stat_options = ["Здоровье ❤️", "Интеллект 🧠", "Радость 🙂", "Отношения 🤝", "Успех ⭐", "Дисциплина 🎯"]
+        stat_index = stat_options.index(goal.get("stat", stat_options[0]))
+        characteristic = st.selectbox(
+            "Какая характеристика качается:",
+            stat_options,
+            index=stat_index,
+            key=f"edit_char_{uid}"
+        )
+        cat_options = ["Работа", "Учёба", "Дом", "Здоровье", "Хобби", "Другое"]
+        cat_index = cat_options.index(goal.get("category", cat_options[0]))
+        category = st.selectbox(
+            "Категория:",
+            cat_options,
+            index=cat_index,
+            key=f"edit_cat_{uid}"
+        )
+
+        RECUR_OPTIONS = {
+            "Не повторять": "none",
+            "Ежедневно": "daily",
+            "Еженедельно": "weekly",
+            "По дням недели": "by_days",
+        }
+        inverse_recur = {v: k for k, v in RECUR_OPTIONS.items()}
+        current_mode_label = inverse_recur.get(goal.get("recur_mode", "none"), "Не повторять")
+        recur_mode_label = st.selectbox(
+            "Повторение:",
+            list(RECUR_OPTIONS.keys()),
+            index=list(RECUR_OPTIONS.keys()).index(current_mode_label),
+            key=f"edit_recur_mode_{uid}"
+        )
+        mode_key = RECUR_OPTIONS[recur_mode_label]
+
+        recur_days = goal.get("recur_days", [])
+        if mode_key == "by_days":
+            st.markdown("**Выберите дни недели:**")
+            checks = []
+            cols = st.columns(7)
+            for i, day_name in enumerate(["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]):
+                with cols[i]:
+                    if st.checkbox(day_name, value=i in recur_days, key=f"edit_day_{i}_{uid}"):
+                        checks.append(i)
+            recur_days = checks
+        else:
+            recur_days = []
+
+        col1, col2 = st.columns(2)
+        save_btn = col1.form_submit_button("Сохранить")
+        cancel_btn = col2.form_submit_button("Отмена")
+
+        if save_btn:
+            if not title.strip():
+                st.error("❌ Нужно ввести название задачи")
+            else:
+                goal["title"] = title.strip()
+                goal["due"] = due_input if isinstance(due_input, date) else date.fromisoformat(str(due_input))
+                goal["type"] = classify_by_due(goal["due"])
+                goal["category"] = category
+                goal["stat"] = characteristic
+                goal["recur_mode"] = mode_key
+                goal["recur_days"] = recur_days
+                goal["due_time"] = time_val.strftime("%H:%M") if time_val else None
+                save_state()
+                st.success("Задача обновлена!")
+                st.session_state.edit_goal_uid = None
+                st.rerun()
+        elif cancel_btn:
+            st.session_state.edit_goal_uid = None
+            st.rerun()
 
 # ========================= ВИЗУАЛИЗАЦИЯ =========================
 def pie_from_counter(counter_like, title="Диаграмма"):
@@ -1260,7 +1351,7 @@ def render_today_tasks_section():
         with st.container():
             st.markdown('<div class="task-card">', unsafe_allow_html=True)
 
-            c_left, c_up, c_down, c_done, c_fail = st.columns([8, 1, 1, 1, 1])
+            c_left, c_up, c_down, c_edit, c_done, c_fail = st.columns([8, 1, 1, 1, 1, 1])
 
             with c_left:
                 st.markdown(
@@ -1283,7 +1374,12 @@ def render_today_tasks_section():
             with c_down:
                 if st.button("⬇️", key=f"today_down_{uid}", use_container_width=True):
                     _move_goal_in_scope(g, "today", +1)
-                    
+            
+            with c_edit:
+                if st.button("✏️", key=f"today_edit_{uid}", use_container_width=True, help="Редактировать"):
+                    st.session_state.edit_goal_uid = uid
+                    st.rerun()
+
             with c_done:
                 if st.button("✅", key=f"today_done_{uid}", use_container_width=True, help="Выполнить"):
                     if g.get("recur_mode", "none") != "none":
@@ -1309,6 +1405,9 @@ def render_today_tasks_section():
                     st.rerun()
 
             st.markdown('</div>', unsafe_allow_html=True)
+
+            if st.session_state.get("edit_goal_uid") == uid:
+                render_edit_goal_form(g, uid)
 
 # ====== ПОЛНАЯ СТАТИСТИКА ======
 
@@ -1769,6 +1868,45 @@ def render_goals_page():
                 st.warning("Цель помечена как проваленная. Штраф применён.")
                 st.rerun()
 
+def render_edit_habit_form(habit: dict, uid: str):
+    with st.form(f"edit_habit_form_{uid}"):
+        st.subheader("✏️ Редактировать привычку")
+        title = st.text_input("Название привычки", value=habit["title"], key=f"h_title_{uid}")
+        days = st.multiselect(
+            "Дни недели",
+            options=list(range(7)),
+            default=habit.get("days", []),
+            format_func=lambda i: WEEKDAY_LABELS[i],
+            key=f"h_days_{uid}",
+        )
+        stat_options = ["Здоровье ❤️","Интеллект 🧠","Радость 🙂","Отношения 🤝","Успех ⭐","Дисциплина 🎯"]
+        stat_index = stat_options.index(habit.get("stat", stat_options[0]))
+        stat = st.selectbox(
+            "Какая характеристика качается:",
+            stat_options,
+            index=stat_index,
+            key=f"h_stat_{uid}",
+        )
+        col1, col2 = st.columns(2)
+        save_btn = col1.form_submit_button("Сохранить")
+        cancel_btn = col2.form_submit_button("Отмена")
+        if save_btn:
+            if not title.strip():
+                st.warning("Введите название привычки.")
+            elif not days:
+                st.warning("Выберите дни недели.")
+            else:
+                habit["title"] = title.strip()
+                habit["days"] = days[:]
+                habit["stat"] = stat
+                save_state()
+                st.success("Привычка обновлена!")
+                st.session_state.edit_habit_uid = None
+                st.rerun()
+        elif cancel_btn:
+            st.session_state.edit_habit_uid = None
+            st.rerun()
+
 def render_habits_page():
     st.header("📆 Трекер привычек")
 
@@ -1849,7 +1987,7 @@ def render_habits_page():
             status_style = "🟡"
 
         # аккуратная строка
-        c1, c2, c3, c4, c5 = st.columns([5, 3, 1, 1, 1])
+        c1, c2, c3, c4, c5, c6 = st.columns([5, 3, 1, 1, 1, 1])
 
         with c1:
             days_str = ", ".join(WEEKDAY_LABELS[i] for i in h.get("days", []))
@@ -1883,10 +2021,18 @@ def render_habits_page():
                 st.rerun()
 
         with c5:
-            if st.button("🗑️", key=f"h_del_{uid}", help="Удалить привычку", use_container_width=True):
+             if st.button("✏️", key=f"h_edit_{uid}", help="Редактировать привычку", use_container_width=True):
+                st.session_state.edit_habit_uid = uid
+                st.rerun()
+
+        with c6:
+             if st.button("🗑️", key=f"h_del_{uid}", help="Удалить привычку", use_container_width=True):
                 st.session_state.habits = [x for x in st.session_state.habits if x is not h]
                 save_state()
                 st.rerun()
+
+            if st.session_state.get("edit_habit_uid") == uid:
+            render_edit_habit_form(h, uid)
 
 # ---------- ИНИЦИАЛИЗАЦИЯ СЕССИИ И АВТО-ПРОЦЕССОВ ----------
 if "initialized" not in st.session_state:
@@ -1954,7 +2100,9 @@ if "initialized" not in st.session_state:
     st.session_state.setdefault("page", "home")          # <— ВАЖНО: текущая страница
     st.session_state.setdefault("show_add_form", False)  # форма добавления задачи на Главной
     st.session_state.setdefault("show_visual", False)    # показ визуализации на Профиле
-
+    st.session_state.setdefault("edit_goal_uid", None)
+    st.session_state.setdefault("edit_habit_uid", None)
+    
     st.session_state.initialized = True
 
 # авто-процессы (каждый запуск)
