@@ -2021,17 +2021,17 @@ def render_habits_page():
                 st.rerun()
 
         with c5:
-             if st.button("✏️", key=f"h_edit_{uid}", help="Редактировать привычку", use_container_width=True):
+            if st.button("✏️", key=f"h_edit_{uid}", help="Редактировать привычку", use_container_width=True):
                 st.session_state.edit_habit_uid = uid
                 st.rerun()
 
         with c6:
-             if st.button("🗑️", key=f"h_del_{uid}", help="Удалить привычку", use_container_width=True):
+            if st.button("🗑️", key=f"h_del_{uid}", help="Удалить привычку", use_container_width=True):
                 st.session_state.habits = [x for x in st.session_state.habits if x is not h]
                 save_state()
                 st.rerun()
 
-            if st.session_state.get("edit_habit_uid") == uid:
+        if st.session_state.get("edit_habit_uid") == uid:
             render_edit_habit_form(h, uid)
 
 # ---------- ИНИЦИАЛИЗАЦИЯ СЕССИИ И АВТО-ПРОЦЕССОВ ----------
@@ -2102,7 +2102,7 @@ if "initialized" not in st.session_state:
     st.session_state.setdefault("show_visual", False)    # показ визуализации на Профиле
     st.session_state.setdefault("edit_goal_uid", None)
     st.session_state.setdefault("edit_habit_uid", None)
-    
+
     st.session_state.initialized = True
 
 # авто-процессы (каждый запуск)
