@@ -781,11 +781,47 @@ def goal_uid(g) -> str:
 def big_goal_uid(g) -> str:
     return f"{g['title']}|{g['due'].isoformat()}|{id(g)}"
 
+def _move_goal_in_scope(goal, scope: str, direction: int):
+    """Перемещает goal вверх/вниз в пределах видимого списка."""
+    goals = st.session_state.goals
+
+    if scope.startswith("active_"):
+        type_map = {
+            "active_short": "Краткосрочная",
+            "active_mid": "Среднесрочная",
+            "active_long": "Долгосрочная",
+        }
+        t = type_map.get(scope)
+        subset = [g for g in goals if not g["done"] and not g["failed"] and g["type"] == t]
+    elif scope == "today":
+        today = date.today()
+        subset = [g for g in goals if g["due"] == today and not g["done"] and not g["failed"]]
+    else:
+        subset = goals
+
+    try:
+        i = subset.index(goal)
+    except ValueError:
+        return
+
+    if direction < 0 and i > 0:
+        other = subset[i - 1]
+    elif direction > 0 and i < len(subset) - 1:
+        other = subset[i + 1]
+    else:
+        return
+
+    gi = goals.index(goal)
+    oi = goals.index(other)
+    goals[gi], goals[oi] = goals[oi], goals[gi]
+    save_state()
+    st.rerun()
+
 def row(goal, scope: str, idx: int):
     reward = GOAL_TYPES[goal["type"]]
     status = "✅" if goal["done"] else ("❌" if goal["failed"] else ("⏰" if goal.get("overdue") else "⬜"))
 
-    left, mid, b1, b2, b3 = st.columns([6, 3, 1, 1, 1])
+    left, mid, up, down, b1, b2, b3 = st.columns([6, 3, 1, 1, 1, 1, 1])
 
     with left:
         if goal["due"] == date.today() and not goal["done"] and not goal["failed"]:
@@ -805,6 +841,11 @@ def row(goal, scope: str, idx: int):
 
 
     uid = goal_uid(goal)
+
+    if up.button("⬆️", key=f"{scope}_up_{uid}_{idx}", use_container_width=True):
+        _move_goal_in_scope(goal, scope, -1)
+    if down.button("⬇️", key=f"{scope}_down_{uid}_{idx}", use_container_width=True):
+        _move_goal_in_scope(goal, scope, +1)
 
     if not goal["done"] and not goal["failed"]:
         if b1.button("✅", key=f"{scope}_done_{uid}_{idx}", use_container_width=True, help="Выполнить"):
@@ -838,7 +879,6 @@ def render_list(goals, scope: str):
     if not goals:
         st.caption("Нет задач в этом списке.")
         return
-    goals = sorted(goals, key=lambda g: goal_due_datetime(g))
     for i, g in enumerate(goals):
         row(g, scope, i)
 
@@ -1202,7 +1242,7 @@ def render_today_tasks_section():
         st.info("Сегодня задач нет! 🎉")
         return  # ← теперь это внутри функции, всё ок
 
-    for g in sorted(today_tasks, key=lambda x: x.get("category", "")):
+    for g in today_tasks:
         uid = goal_uid(g)
         reward = GOAL_TYPES.get(g["type"], 5)
 
@@ -1220,7 +1260,7 @@ def render_today_tasks_section():
         with st.container():
             st.markdown('<div class="task-card">', unsafe_allow_html=True)
 
-            c_left, c_done, c_fail = st.columns([8, 1, 1])
+            c_left, c_up, c_down, c_done, c_fail = st.columns([8, 1, 1, 1, 1])
 
             with c_left:
                 st.markdown(
@@ -1237,6 +1277,13 @@ def render_today_tasks_section():
                     unsafe_allow_html=True
                 )
 
+            with c_up:
+                if st.button("⬆️", key=f"today_up_{uid}", use_container_width=True):
+                    _move_goal_in_scope(g, "today", -1)
+            with c_down:
+                if st.button("⬇️", key=f"today_down_{uid}", use_container_width=True):
+                    _move_goal_in_scope(g, "today", +1)
+                    
             with c_done:
                 if st.button("✅", key=f"today_done_{uid}", use_container_width=True, help="Выполнить"):
                     if g.get("recur_mode", "none") != "none":
